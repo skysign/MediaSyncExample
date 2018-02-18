@@ -12,6 +12,7 @@ import android.media.MediaFormat;
 import android.media.MediaSync;
 import android.media.PlaybackParams;
 import android.media.SyncParams;
+import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -31,9 +32,11 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     protected static final int REQUEST_PERMISSION = 100;
 
     private SurfaceView msvPlay;
-    private MediaExtractor mExtractor;
+    private MediaExtractor mExtractorVideo;
+    private MediaExtractor mExtractorAudio;
     private MediaCodec mVideoDecoder;
     private int miVideoTrack;
+    private int nFrameRate;
     private MediaCodec mAudioDecoder;
     private int miAudioTrack;
     private int mnSampleRate;
@@ -55,6 +58,23 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     }
 
     @Override
+    protected void onPause() {
+        mMediaSync.setPlaybackParams(new PlaybackParams().setSpeed(0.f));
+        mMediaSync.release();
+
+        mVideoDecoder.stop();
+        mVideoDecoder.release();
+
+        mAudioDecoder.stop();
+        mAudioDecoder.release();
+
+        mExtractorVideo.release();
+        mExtractorAudio.release();
+
+        super.onPause();
+    }
+
+    @Override
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
         Log.d(TAG, "surfaceCreated");
     }
@@ -65,9 +85,16 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
         AssetFileDescriptor file = this.getResources().openRawResourceFd(R.raw.a712989584);
 
-        mExtractor = new MediaExtractor();
+        mExtractorVideo = new MediaExtractor();
         try {
-            mExtractor.setDataSource(file);
+            mExtractorVideo.setDataSource(file);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        mExtractorAudio = new MediaExtractor();
+        try {
+            mExtractorAudio.setDataSource(file);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -75,18 +102,21 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         mMediaSync = new MediaSync();
         mMediaSync.setSurface(surfaceHolder.getSurface());
 
-        for (int i=0; i < mExtractor.getTrackCount(); i++) {
-            MediaFormat mediaFormat = mExtractor.getTrackFormat(i);
+        for (int i=0; i < mExtractorVideo.getTrackCount(); i++) {
+            MediaFormat mediaFormat = mExtractorVideo.getTrackFormat(i);
 
             String strMime = mediaFormat.getString(MediaFormat.KEY_MIME);
 
             if (strMime.startsWith("video/")) {
                 miVideoTrack = i;
+                mExtractorVideo.selectTrack(miVideoTrack);
                 try {
                     mVideoDecoder = MediaCodec.createDecoderByType(strMime);
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
+
+                nFrameRate = mediaFormat.getInteger(MediaFormat.KEY_FRAME_RATE);
 
                 Surface surface = mMediaSync.createInputSurface();
 
@@ -95,8 +125,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     @Override
                     public void onInputBufferAvailable(@NonNull MediaCodec mediaCodec, int i) {
                         ByteBuffer byteBuffer = mVideoDecoder.getInputBuffer(i);
-                        mExtractor.selectTrack(miVideoTrack);
-                        int nRead = mExtractor.readSampleData(byteBuffer, 0);
+                        int nRead = mExtractorVideo.readSampleData(byteBuffer, 0);
 
                         Log.d("Video", "onInputBufferAvailable i "+i+" nRead " + nRead);
 
@@ -104,8 +133,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                             mVideoDecoder.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                         }
                         else {
-                            mVideoDecoder.queueInputBuffer(i, 0, nRead, mExtractor.getSampleTime(), 0);
-                            mExtractor.advance();
+                            mVideoDecoder.queueInputBuffer(i, 0, nRead, mExtractorVideo.getSampleTime(), 0);
+                            mExtractorVideo.advance();
                         }
                     }
 
@@ -130,11 +159,18 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     public void onOutputFormatChanged(@NonNull MediaCodec mediaCodec, @NonNull MediaFormat mediaFormat) {
                         Log.d("Video", "onOutputFormatChanged");
                     }
-                });
+                }, new Handler());
             }
+        }
+
+        for (int i=0; i < mExtractorAudio.getTrackCount(); i++) {
+            MediaFormat mediaFormat = mExtractorAudio.getTrackFormat(i);
+
+            String strMime = mediaFormat.getString(MediaFormat.KEY_MIME);
 
             if (strMime.startsWith("audio/")) {
                 miAudioTrack = i;
+                mExtractorAudio.selectTrack(miAudioTrack);
                 try {
                     mAudioDecoder = MediaCodec.createDecoderByType(strMime);
                 } catch (IOException e) {
@@ -147,27 +183,29 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 mAudioDecoder.setCallback(new MediaCodec.Callback() {
                     @Override
                     public void onInputBufferAvailable(@NonNull MediaCodec mediaCodec, int i) {
-                        mExtractor.selectTrack(miAudioTrack);
                         ByteBuffer byteBuffer = mAudioDecoder.getInputBuffer(i);
-                        int nRead = mExtractor.readSampleData(byteBuffer, 0);
+                        int nRead = mExtractorAudio.readSampleData(byteBuffer, 0);
 
-                        Log.d("Audio", "onInputBufferAvailable i "+i+" nRead " + nRead);
+                        Log.d("Audio", "onInputBufferAvailable i " + i + " nRead " + nRead);
 
                         if (nRead < 0) {
                             mAudioDecoder.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                        }
-                        else {
-                            mAudioDecoder.queueInputBuffer(i, 0, nRead, mExtractor.getSampleTime(), 0);
-                            mExtractor.advance();
+                        } else {
+                            mAudioDecoder.queueInputBuffer(i, 0, nRead, mExtractorAudio.getSampleTime(), 0);
+                            mExtractorAudio.advance();
                         }
                     }
 
                     @Override
                     public void onOutputBufferAvailable(@NonNull MediaCodec mediaCodec, int i, @NonNull MediaCodec.BufferInfo bufferInfo) {
-                        ByteBuffer byteBuffer = mAudioDecoder.getOutputBuffer(i);
-                        mMediaSync.queueAudio(byteBuffer, i, bufferInfo.presentationTimeUs);
+                        ByteBuffer decoderBuffer = mAudioDecoder.getOutputBuffer(i);
+                        ByteBuffer copyBuffer = ByteBuffer.allocate(decoderBuffer.remaining());
+                        copyBuffer.put(decoderBuffer);
+                        copyBuffer.flip();
+                        mAudioDecoder.releaseOutputBuffer(i, false);
+                        mMediaSync.queueAudio(copyBuffer, i, bufferInfo.presentationTimeUs);
 
-                        Log.d("Audio", "onOutputBufferAvailable i "+i+" presentationTimeUs " + bufferInfo.presentationTimeUs);
+                        Log.d("Audio", "onOutputBufferAvailable i " + i + " presentationTimeUs " + bufferInfo.presentationTimeUs);
                     }
 
                     @Override
@@ -193,10 +231,10 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 mMediaSync.setCallback(new MediaSync.Callback() {
                     @Override
                     public void onAudioBufferConsumed(@NonNull MediaSync mediaSync, @NonNull ByteBuffer byteBuffer, int i) {
-                        mAudioDecoder.releaseOutputBuffer(i, false);
+                        byteBuffer.clear();
                         Log.d("MediaSync", "onAudioBufferConsumed i " + i);
                     }
-                }, null);
+                }, new Handler());
             }
         }
 
@@ -206,11 +244,17 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                 Log.d("MediaSync", "onError "+i +" " + i1);
             }
         }, null);
-        mMediaSync.setSyncParams(new SyncParams().allowDefaults());
+
+//        SyncParams params = new SyncParams().allowDefaults();
+////        params.setFrameRate(nFrameRate);
+////        params.setAudioAdjustMode(SyncParams.AUDIO_ADJUST_MODE_DEFAULT);
+////        params.setSyncSource(SyncParams.SYNC_SOURCE_AUDIO);
+////        params.setSyncSource(SyncParams.SYNC_SOURCE_VSYNC);
+//        mMediaSync.setSyncParams(params);
         mMediaSync.setPlaybackParams(new PlaybackParams().setSpeed(1.0f));
         Log.d("MediaSync", "start");
-//        mAudioDecoder.start();
-//        Log.d("mAudioDecoder", "start");
+        mAudioDecoder.start();
+        Log.d("mAudioDecoder", "start");
         mVideoDecoder.start();
         Log.d("mVideoDecoder", "start");
     }
