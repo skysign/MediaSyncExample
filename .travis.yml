@@ -6,11 +6,11 @@ android:
     - platform-tools
     - build-tools-27.0.3
     - android-24
-
-licenses:
+  licenses:
     - 'android-sdk-license-.+'
+    - '.+'
 
 before_install:
   - chmod +x gradlew
   - yes | sdkmanager "platforms;android-24"
-  - yes | sdkmanager --licenses
+
