@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/skysign/MediaSyncExample.svg?branch=master)](https://travis-ci.org/skysign/MediaSyncExample)
+
 # MediaSync Example
 This project is an example of Android MediaSync. As of now (2018/Feb/19), there is no offical example regarding MediaSync class, yet. Especially, it is described to understand how to use it with MediaCodec.
 
